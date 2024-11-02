@@ -1,10 +1,10 @@
 const express = require("express");
 const { usersCollections } = require("..");
+const { verifyJWT, isAdmin } = require("../middleware/auth"); // Import middleware
 const router = express.Router();
-// const { verifyJWT, isAdmin } = require("../middleware");
 
-// Regular user route
-router.get("/users", async (req, res) => {
+// Protected route: Get all users (Admin access required)
+router.get("/users", verifyJWT, isAdmin, async (req, res) => {
   try {
     const result = await usersCollections.find().toArray();
     res.status(200).send(result);
@@ -14,42 +14,81 @@ router.get("/users", async (req, res) => {
   }
 });
 
-router.post("/users", async (req, res) => {
+// Protected route: Get a specific user by ID
+router.get("/user/:id", verifyJWT, async (req, res) => {
   try {
-    const user = req.body;
-    console.log(user);
+    const userId = req.params.id;
+    const user = await usersCollections.findOne(
+      { _id: userId },
+      { projection: { password: 0 } }
+    );
 
-    const query = { email: user.email };
-    const existingUser = await usersCollections.findOne(query);
-
-    if (existingUser) {
-      return res.status(400).send({ message: "User already exists" });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
     }
 
-    user.role = "user"; // Default role is user
-
-    const result = await usersCollections.insertOne(user);
-    res.status(201).send(result);
+    res.json(user);
   } catch (error) {
     console.error(error);
-    res.status(500).send({ error: "Internal Server Error" });
+    res.status(500).json({ message: "Server error" });
   }
 });
 
-// Check if a user has admin role route
-router.get("/users/:email", async (req, res) => {
+// Protected route: Update user information
+router.put("/user/:id", verifyJWT, async (req, res) => {
+  const { name, email } = req.body;
+  try {
+    const userId = req.params.id;
+    const updatedUser = await usersCollections.findOneAndUpdate(
+      { _id: userId },
+      { $set: { name, email } },
+      { returnOriginal: false }
+    );
+
+    if (!updatedUser.value) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json(updatedUser.value);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Admin-only route: Update user role
+router.put("/user/:id/role", verifyJWT, isAdmin, async (req, res) => {
+  const { role } = req.body;
+  const userId = req.params.id;
+  try {
+    const user = await usersCollections.findOneAndUpdate(
+      { _id: userId },
+      { $set: { role } },
+      { returnOriginal: false }
+    );
+
+    if (!user.value) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json(user.value);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Check if a user has admin role
+router.get("/users/:email", verifyJWT, async (req, res) => {
   try {
     const userEmail = req.params.email;
-
     const user = await usersCollections.findOne({ email: userEmail });
 
     if (!user) {
       return res.status(404).send({ error: "User not found" });
     }
 
-    const userRole = user.role || "user";
-    const isAdmin = userRole === "admin";
-
+    const isAdmin = user.role === "admin";
     res.status(200).send({ email: userEmail, isAdmin });
   } catch (error) {
     console.error(error);
